@@ -28,7 +28,7 @@ jobs:
             name="$1"
             url="$2"
             echo "===== $name $url ====="
-            timeout 60s "$chrome"               --headless=new               --no-sandbox               --disable-dev-shm-usage               --enable-logging=stderr               --v=1               --window-size=430,932               --virtual-time-budget=12000               --screenshot="diagnostics/$name.png"               --dump-dom               "$url"               >"diagnostics/$name.log" 2>&1 || true
+            timeout 90s "$chrome"               --headless=new               --no-sandbox               --disable-dev-shm-usage               --enable-logging=stderr               --v=1               --window-size=430,932               --virtual-time-budget=12000               --screenshot="diagnostics/$name.png"               --dump-dom               "$url"               >"diagnostics/$name.log" 2>&1 || true
             echo "----- interesting log lines -----"
             grep -E -i "CONSOLE|SCRIPT|ERROR|Godot|WebAssembly|WASM|exception|failed|invalid|parse" "diagnostics/$name.log" | tail -n 160 || true
             echo "----- tail -----"

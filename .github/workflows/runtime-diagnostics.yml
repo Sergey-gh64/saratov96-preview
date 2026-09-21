@@ -1,0 +1,45 @@
+name: Runtime diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/runtime-diagnostics.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Diagnose live Godot pages
+        shell: bash
+        run: |
+          set -uo pipefail
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          echo "CHROME=$chrome"
+          "$chrome" --version || true
+          mkdir -p diagnostics
+
+          diagnose () {
+            name="$1"
+            url="$2"
+            echo "===== $name $url ====="
+            timeout 60s "$chrome"               --headless=new               --no-sandbox               --disable-dev-shm-usage               --enable-logging=stderr               --v=1               --window-size=430,932               --virtual-time-budget=12000               --screenshot="diagnostics/$name.png"               --dump-dom               "$url"               >"diagnostics/$name.log" 2>&1 || true
+            echo "----- interesting log lines -----"
+            grep -E -i "CONSOLE|SCRIPT|ERROR|Godot|WebAssembly|WASM|exception|failed|invalid|parse" "diagnostics/$name.log" | tail -n 160 || true
+            echo "----- tail -----"
+            tail -n 80 "diagnostics/$name.log" || true
+          }
+
+          diagnose level1 "https://sergey-gh64.github.io/saratov96-preview/"
+          diagnose level2 "https://sergey-gh64.github.io/saratov96-preview/school/"
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: saratov96-runtime-diagnostics
+          path: diagnostics

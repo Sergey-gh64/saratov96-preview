@@ -1,5 +1,5 @@
-name: Runtime diagnostics # live
-# verify-live: d907a02
+name: Runtime diagnostics
+# verify-live: d907a02-puppeteer
 
 on:
   workflow_dispatch:
@@ -14,30 +14,95 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: Diagnose live Godot pages
+      - name: Install Puppeteer Core
+        run: npm install puppeteer-core@24
+
+      - name: Capture real Godot frames
         shell: bash
         run: |
-          set -uo pipefail
-          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          echo "CHROME=$chrome"
-          "$chrome" --version || true
+          set -euo pipefail
           mkdir -p diagnostics
+          cat > diagnose.mjs <<'EOF'
+          import puppeteer from 'puppeteer-core';
+          import fs from 'node:fs';
 
-          diagnose () {
-            name="$1"
-            url="$2"
-            echo "===== $name $url ====="
-            timeout 90s "$chrome"               --headless=new               --no-sandbox               --disable-dev-shm-usage               --enable-logging=stderr               --v=1               --window-size=430,932               --virtual-time-budget=12000               --screenshot="diagnostics/$name.png"               --dump-dom               "$url"               >"diagnostics/$name.log" 2>&1 || true
-            echo "----- interesting log lines -----"
-            grep -E -i "CONSOLE|SCRIPT|ERROR|Godot|WebAssembly|WASM|exception|failed|invalid|parse" "diagnostics/$name.log" | tail -n 160 || true
-            echo "----- tail -----"
-            tail -n 80 "diagnostics/$name.log" || true
+          const chrome = '/usr/bin/google-chrome';
+
+          async function diagnose(name, url) {
+            const lines = [];
+            const browser = await puppeteer.launch({
+              executablePath: chrome,
+              headless: true,
+              args: [
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--enable-unsafe-swiftshader',
+                '--ignore-gpu-blocklist',
+                '--window-size=430,932',
+              ],
+            });
+            try {
+              const page = await browser.newPage();
+              await page.setViewport({ width: 430, height: 932, deviceScaleFactor: 1 });
+              page.on('console', msg => lines.push('CONSOLE '+msg.type()+': '+msg.text()));
+              page.on('pageerror', err => lines.push('PAGEERROR: '+err.stack));
+              page.on('requestfailed', req => lines.push('REQUESTFAILED: '+req.url()+' '+req.failure()?.errorText));
+
+              await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+
+              let overlayRemoved = false;
+              try {
+                await page.waitForFunction(() => {
+                  const status = document.getElementById('status');
+                  return !status || !document.body.contains(status);
+                }, { timeout: 90000 });
+                overlayRemoved = true;
+              } catch (e) {
+                lines.push('WAIT_ERROR: Godot status overlay was not removed within 90s');
+              }
+
+              await new Promise(r => setTimeout(r, 3000));
+
+              const state = await page.evaluate(() => {
+                const canvas = document.getElementById('canvas');
+                const link = document.querySelector('.s96-level-link');
+                return {
+                  title: document.title,
+                  overlayPresent: !!document.getElementById('status'),
+                  canvasWidth: canvas?.width ?? null,
+                  canvasHeight: canvas?.height ?? null,
+                  clientWidth: canvas?.clientWidth ?? null,
+                  clientHeight: canvas?.clientHeight ?? null,
+                  navText: link?.textContent ?? null,
+                  navHref: link?.getAttribute('href') ?? null,
+                };
+              });
+              state.overlayRemoved = overlayRemoved;
+
+              await page.screenshot({ path: 'diagnostics/'+name+'.png', fullPage: true });
+              fs.writeFileSync('diagnostics/'+name+'.json', JSON.stringify(state, null, 2));
+              fs.writeFileSync('diagnostics/'+name+'.log', lines.join('\n'));
+              console.log(name, JSON.stringify(state));
+            } finally {
+              await browser.close();
+            }
           }
 
-          diagnose level1 "https://sergey-gh64.github.io/saratov96-preview/"
-          diagnose level2 "https://sergey-gh64.github.io/saratov96-preview/school/"
+          await diagnose('level1', 'https://sergey-gh64.github.io/saratov96-preview/');
+          await diagnose('level2', 'https://sergey-gh64.github.io/saratov96-preview/school/');
+          EOF
+
+          node diagnose.mjs
+          echo "--- level1 state ---"
+          cat diagnostics/level1.json
+          echo "--- level1 errors ---"
+          cat diagnostics/level1.log || true
+          echo "--- level2 state ---"
+          cat diagnostics/level2.json
+          echo "--- level2 errors ---"
+          cat diagnostics/level2.log || true
 
       - name: Upload diagnostics
         uses: actions/upload-artifact@v4

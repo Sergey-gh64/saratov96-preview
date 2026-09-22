@@ -1,5 +1,5 @@
 name: Runtime diagnostics
-# verify-live: a25e870-audio
+# verify-live: simulate-ios-audio-suspension
 
 on:
   workflow_dispatch:
@@ -122,6 +122,31 @@ jobs:
               state.overlayRemoved = overlayRemoved;
 
               if (name === 'level1' && overlayRemoved) {
+                state.godotAudioBefore = await page.evaluate(() => ({
+                  exists: typeof GodotAudio !== 'undefined' && !!GodotAudio.ctx,
+                  state: (typeof GodotAudio !== 'undefined' && GodotAudio.ctx) ? GodotAudio.ctx.state : null,
+                }));
+
+                await page.evaluate(async () => {
+                  if (typeof GodotAudio !== 'undefined' && GodotAudio.ctx) {
+                    await GodotAudio.ctx.suspend();
+                  }
+                  const unlock = () => {
+                    try {
+                      if (typeof GodotAudio !== 'undefined' && GodotAudio.ctx && GodotAudio.ctx.state === 'suspended') {
+                        GodotAudio.ctx.resume().catch(() => {});
+                      }
+                    } catch (_) {}
+                  };
+                  document.addEventListener('pointerdown', unlock, {capture:true, passive:true});
+                  document.addEventListener('touchstart', unlock, {capture:true, passive:true});
+                  document.addEventListener('click', unlock, {capture:true, passive:true});
+                });
+
+                state.godotAudioSuspended = await page.evaluate(() => (
+                  typeof GodotAudio !== 'undefined' && GodotAudio.ctx ? GodotAudio.ctx.state : null
+                ));
+
                 await page.mouse.click(60, 243);
                 await new Promise(r => setTimeout(r, 2500));
                 state.audioAfter = await page.evaluate(() => {
@@ -131,6 +156,7 @@ jobs:
                     starts: audio.starts || 0,
                     mediaPlays: audio.mediaPlays || 0,
                     contextState: audio.lastContext?.state || null,
+                    godotContextState: (typeof GodotAudio !== 'undefined' && GodotAudio.ctx) ? GodotAudio.ctx.state : null,
                   };
                 });
               }

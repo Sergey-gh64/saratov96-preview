@@ -11,7 +11,7 @@ on:
       - ".github/workflows/saratov96-release.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: saratov96-production-release
@@ -45,6 +45,8 @@ jobs:
   release:
     name: Sync source → QA → GitHub Pages
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 25
 

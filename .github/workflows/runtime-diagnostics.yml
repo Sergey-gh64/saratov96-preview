@@ -1,5 +1,5 @@
 name: Runtime diagnostics
-# verify-live: d907a02-puppeteer
+# verify-live: audio-toggle-gate
 
 on:
   workflow_dispatch:
@@ -46,6 +46,39 @@ jobs:
             try {
               const page = await browser.newPage();
               await page.setViewport({ width: 430, height: 932, deviceScaleFactor: 1 });
+              await page.evaluateOnNewDocument(() => {
+                window.__s96Audio = { resumes: 0, starts: 0, mediaPlays: 0 };
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (AC && AC.prototype) {
+                  const resume = AC.prototype.resume;
+                  if (resume) {
+                    AC.prototype.resume = function(...args) {
+                      window.__s96Audio.resumes++;
+                      window.__s96Audio.lastContext = this;
+                      return resume.apply(this, args);
+                    };
+                  }
+                  const createBufferSource = AC.prototype.createBufferSource;
+                  if (createBufferSource) {
+                    AC.prototype.createBufferSource = function(...args) {
+                      const node = createBufferSource.apply(this, args);
+                      const start = node.start?.bind(node);
+                      if (start) {
+                        node.start = (...startArgs) => {
+                          window.__s96Audio.starts++;
+                          return start(...startArgs);
+                        };
+                      }
+                      return node;
+                    };
+                  }
+                }
+                const mediaPlay = HTMLMediaElement.prototype.play;
+                HTMLMediaElement.prototype.play = function(...args) {
+                  window.__s96Audio.mediaPlays++;
+                  return mediaPlay.apply(this, args);
+                };
+              });
               page.on('console', msg => lines.push('CONSOLE '+msg.type()+': '+msg.text()));
               page.on('pageerror', err => lines.push('PAGEERROR: '+err.stack));
               page.on('requestfailed', req => lines.push('REQUESTFAILED: '+req.url()+' '+req.failure()?.errorText));
@@ -68,6 +101,7 @@ jobs:
               const state = await page.evaluate(() => {
                 const canvas = document.getElementById('canvas');
                 const link = document.querySelector('.s96-level-link');
+                const audio = window.__s96Audio || {};
                 return {
                   title: document.title,
                   overlayPresent: !!document.getElementById('status'),
@@ -77,9 +111,29 @@ jobs:
                   clientHeight: canvas?.clientHeight ?? null,
                   navText: link?.textContent ?? null,
                   navHref: link?.getAttribute('href') ?? null,
+                  audioBefore: {
+                    resumes: audio.resumes || 0,
+                    starts: audio.starts || 0,
+                    mediaPlays: audio.mediaPlays || 0,
+                    contextState: audio.lastContext?.state || null,
+                  },
                 };
               });
               state.overlayRemoved = overlayRemoved;
+
+              if (name === 'level1' && overlayRemoved) {
+                await page.mouse.click(60, 243);
+                await new Promise(r => setTimeout(r, 2500));
+                state.audioAfter = await page.evaluate(() => {
+                  const audio = window.__s96Audio || {};
+                  return {
+                    resumes: audio.resumes || 0,
+                    starts: audio.starts || 0,
+                    mediaPlays: audio.mediaPlays || 0,
+                    contextState: audio.lastContext?.state || null,
+                  };
+                });
+              }
 
               await page.screenshot({ path: 'diagnostics/'+name+'.png', fullPage: true });
               fs.writeFileSync('diagnostics/'+name+'.json', JSON.stringify(state, null, 2));

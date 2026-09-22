@@ -2,12 +2,17 @@ name: Saratov 96 GitHub-native Release
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - "source/**"
+      - ".github/workflows/saratov96-release.yml"
   pull_request:
     branches:
       - main
     paths:
+      - "source/**"
       - ".github/workflows/saratov96-release.yml"
 
 permissions:
@@ -20,9 +25,8 @@ concurrency:
 env:
   GODOT_VERSION: "4.7.2"
   GODOT_RELEASE: "4.7.2-stable"
-  SOURCE_REPO: "Sergey-gh64/ai-game-dev-lab"
-  SOURCE_REF: "release/saratov96-live"
-  PROJECT_REL: "games/saratov96-mobile"
+  PROJECT_REL: "source/saratov96-mobile"
+  SOURCE_COMMIT_FILE: "source/SOURCE_COMMIT"
 
 jobs:
   validate:
@@ -35,31 +39,12 @@ jobs:
         run: |
           set -euxo pipefail
           test -s .github/workflows/saratov96-release.yml
-          grep -q 'S96_SOURCE_READ_TOKEN' .github/workflows/saratov96-release.yml
-          grep -q 'release/saratov96-live' .github/workflows/saratov96-release.yml
-          grep -q 'games/saratov96-mobile' .github/workflows/saratov96-release.yml
+          test -s source/SOURCE_COMMIT
+          test -s source/saratov96-mobile/project.godot
+          grep -q 'source/saratov96-mobile' .github/workflows/saratov96-release.yml
           grep -q 'smoke_test.tscn' .github/workflows/saratov96-release.yml
           grep -q 'browser_smoke.mjs' .github/workflows/saratov96-release.yml
           grep -q 'git push origin HEAD:gh-pages' .github/workflows/saratov96-release.yml
-
-      - name: Check existing credential aliases
-        env:
-          S96_SOURCE_READ_TOKEN: ${{ secrets.S96_SOURCE_READ_TOKEN }}
-          GH_TOKEN_SECRET: ${{ secrets.GH_TOKEN }}
-          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
-          PAT: ${{ secrets.PAT }}
-          GAMEDEV_TOKEN: ${{ secrets.GAMEDEV_TOKEN }}
-          GAMEDEV_GITHUB_TOKEN: ${{ secrets.GAMEDEV_GITHUB_TOKEN }}
-          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: |
-          for name in S96_SOURCE_READ_TOKEN GH_TOKEN_SECRET GITHUB_PAT PAT GAMEDEV_TOKEN GAMEDEV_GITHUB_TOKEN REPO_TOKEN PERSONAL_ACCESS_TOKEN; do
-            if [ -n "${!name}" ]; then
-              echo "$name=PRESENT"
-            else
-              echo "$name=ABSENT"
-            fi
-          done
 
   release:
     name: Sync source → QA → GitHub Pages
@@ -75,35 +60,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require read-only source token
-        env:
-          SOURCE_TOKEN: ${{ secrets.S96_SOURCE_READ_TOKEN }}
-        run: |
-          if [ -z "$SOURCE_TOKEN" ]; then
-            echo "::error::Missing S96_SOURCE_READ_TOKEN. Use a fine-grained token with read-only Contents access to Sergey-gh64/ai-game-dev-lab."
-            exit 1
-          fi
-
-      - name: Checkout private release source
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ env.SOURCE_REF }}
-          token: ${{ secrets.S96_SOURCE_READ_TOKEN }}
-          path: source
-          fetch-depth: 1
-          persist-credentials: false
-
       - name: Decide whether release changed
         id: source
         shell: bash
         run: |
           set -euxo pipefail
-          PROJECT_DIR="$GITHUB_WORKSPACE/source/$PROJECT_REL"
+          PROJECT_DIR="$GITHUB_WORKSPACE/$PROJECT_REL"
           test -s "$PROJECT_DIR/project.godot"
           test -s "$PROJECT_DIR/scenes/level1.tscn"
           test -s "$PROJECT_DIR/scenes/level2.tscn"
-          SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD)"
+          SOURCE_SHA="$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/$SOURCE_COMMIT_FILE")"
+          test "${#SOURCE_SHA}" -eq 40
           echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
           git fetch origin gh-pages:refs/remotes/origin/gh-pages
@@ -113,7 +80,7 @@ jobs:
           )"
 
           NEEDS_RELEASE=true
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$CURRENT_SHA" = "$SOURCE_SHA" ]; then
+          if [ "$CURRENT_SHA" = "$SOURCE_SHA" ]; then
             NEEDS_RELEASE=false
           fi
           echo "needs_release=$NEEDS_RELEASE" >> "$GITHUB_OUTPUT"
@@ -171,7 +138,7 @@ jobs:
 
       - name: Validate Godot project
         if: steps.source.outputs.needs_release == 'true'
-        working-directory: source/games/saratov96-mobile
+        working-directory: source/saratov96-mobile
         run: |
           set -euxo pipefail
           test "$(find . -name project.godot -print | wc -l)" -eq 1
@@ -181,7 +148,7 @@ jobs:
 
       - name: Stamp source commit
         if: steps.source.outputs.needs_release == 'true'
-        working-directory: source/games/saratov96-mobile
+        working-directory: source/saratov96-mobile
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
@@ -199,7 +166,7 @@ jobs:
 
       - name: Export Web release
         if: steps.source.outputs.needs_release == 'true'
-        working-directory: source/games/saratov96-mobile
+        working-directory: source/saratov96-mobile
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
@@ -222,7 +189,7 @@ jobs:
 
       - name: Mobile browser touch QA
         if: steps.source.outputs.needs_release == 'true'
-        working-directory: source/games/saratov96-mobile
+        working-directory: source/saratov96-mobile
         run: |
           set -euxo pipefail
           npm install --no-save --package-lock=false puppeteer-core@24
@@ -248,7 +215,7 @@ jobs:
           git worktree add --detach "$PAGES_DIR" origin/gh-pages
 
           find "$PAGES_DIR" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "$GITHUB_WORKSPACE/source/$PROJECT_REL/build/web/." "$PAGES_DIR/"
+          cp -a "$GITHUB_WORKSPACE/$PROJECT_REL/build/web/." "$PAGES_DIR/"
 
           cd "$PAGES_DIR"
           git config user.name "Saratov 96 Release Bot"
@@ -266,7 +233,6 @@ jobs:
       - name: Release summary
         if: always()
         run: |
-          echo "Source ref: $SOURCE_REPO@$SOURCE_REF"
           echo "Source commit: ${{ steps.source.outputs.sha }}"
           echo "Released: ${{ steps.source.outputs.needs_release }}"
           echo "Preview: https://sergey-gh64.github.io/saratov96-preview/"

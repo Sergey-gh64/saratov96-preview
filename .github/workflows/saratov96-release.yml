@@ -1,0 +1,228 @@
+name: Saratov 96 GitHub-native Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: saratov96-production-release
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_RELEASE: "4.7.2-stable"
+  SOURCE_REPO: "Sergey-gh64/ai-game-dev-lab"
+  SOURCE_REF: "release/saratov96-live"
+  PROJECT_REL: "games/saratov96-mobile"
+
+jobs:
+  release:
+    name: Sync source → QA → GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout public Pages repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require read-only source token
+        env:
+          SOURCE_TOKEN: ${{ secrets.S96_SOURCE_READ_TOKEN }}
+        run: |
+          if [ -z "$SOURCE_TOKEN" ]; then
+            echo "::error::Missing S96_SOURCE_READ_TOKEN. Use a fine-grained token with read-only Contents access to Sergey-gh64/ai-game-dev-lab."
+            exit 1
+          fi
+
+      - name: Checkout private release source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ secrets.S96_SOURCE_READ_TOKEN }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Decide whether release changed
+        id: source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PROJECT_DIR="$GITHUB_WORKSPACE/source/$PROJECT_REL"
+          test -s "$PROJECT_DIR/project.godot"
+          test -s "$PROJECT_DIR/scenes/level1.tscn"
+          test -s "$PROJECT_DIR/scenes/level2.tscn"
+          SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD)"
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages
+          CURRENT_SHA="$(
+            git show origin/gh-pages:build.json 2>/dev/null |
+            python3 -c 'import json,sys; print(json.load(sys.stdin).get("commit",""))' 2>/dev/null || true
+          )"
+
+          NEEDS_RELEASE=true
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$CURRENT_SHA" = "$SOURCE_SHA" ]; then
+            NEEDS_RELEASE=false
+          fi
+          echo "needs_release=$NEEDS_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "Source:  $SOURCE_SHA"
+          echo "Current: $CURRENT_SHA"
+          echo "Release: $NEEDS_RELEASE"
+
+      - name: Install Godot runtime dependencies
+        if: steps.source.outputs.needs_release == 'true'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl unzip \
+            libfontconfig1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libgl1 libasound2t64
+
+      - name: Install pinned Godot 4.7.2
+        if: steps.source.outputs.needs_release == 'true'
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/godot"
+          curl -LfsS \
+            "https://godot-releases.nbg1.your-objectstorage.com/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" \
+            -o "$RUNNER_TEMP/godot.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          mv "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" "$RUNNER_TEMP/godot/godot"
+          chmod +x "$RUNNER_TEMP/godot/godot"
+          echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/godot/godot" --version
+
+      - name: Install Web export templates only
+        if: steps.source.outputs.needs_release == 'true'
+        run: |
+          set -euxo pipefail
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$TEMPLATE_DIR"
+          python3 -m pip install --quiet remotezip
+          TEMPLATE_DIR="$TEMPLATE_DIR" GODOT_RELEASE="$GODOT_RELEASE" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from remotezip import RemoteZip
+
+          release = os.environ["GODOT_RELEASE"]
+          out = Path(os.environ["TEMPLATE_DIR"])
+          url = f"https://godot-releases.nbg1.your-objectstorage.com/{release}/Godot_v{release}_export_templates.tpz"
+          with RemoteZip(url) as archive:
+              for name in (
+                  "templates/web_nothreads_release.zip",
+                  "templates/web_nothreads_debug.zip",
+                  "templates/version.txt",
+              ):
+                  (out / Path(name).name).write_bytes(archive.read(name))
+          PY
+          test -s "$TEMPLATE_DIR/web_nothreads_release.zip"
+
+      - name: Validate Godot project
+        if: steps.source.outputs.needs_release == 'true'
+        working-directory: source/games/saratov96-mobile
+        run: |
+          set -euxo pipefail
+          test "$(find . -name project.godot -print | wc -l)" -eq 1
+          ! find . -type f \( -name 'source_url.txt' -o -name 'patch_web.py' \) | grep -q .
+          godot --headless --path . --editor --quit
+          godot --headless --path . res://tests/smoke_test.tscn
+
+      - name: Stamp source commit
+        if: steps.source.outputs.needs_release == 'true'
+        working-directory: source/games/saratov96-mobile
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path("scripts/build_info.gd")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace(
+              'const BUILD_COMMIT: String = "dev"',
+              f'const BUILD_COMMIT: String = "{os.environ["SOURCE_SHA"]}"',
+          )
+          p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Export Web release
+        if: steps.source.outputs.needs_release == 'true'
+        working-directory: source/games/saratov96-mobile
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euxo pipefail
+          rm -rf build/web
+          mkdir -p build/web
+          godot --headless --path . --export-release Web build/web/index.html
+          python3 tools/prepare_web_release.py \
+            build/web \
+            "$SOURCE_SHA" \
+            "mobile-v1.${GITHUB_RUN_NUMBER}"
+          test -s build/web/index.html
+          test -s build/web/index.wasm
+          test -s build/web/index.pck
+          test -s build/web/build.json
+          grep -q 'viewport-fit=cover' build/web/index.html
+          grep -q 'name="s96-build"' build/web/index.html
+          test ! -e build/web/sw.js
+          test ! -e build/web/service_worker.js
+
+      - name: Mobile browser touch QA
+        if: steps.source.outputs.needs_release == 'true'
+        working-directory: source/games/saratov96-mobile
+        run: |
+          set -euxo pipefail
+          npm install --no-save --package-lock=false puppeteer-core@24
+          python3 -m http.server 4173 --directory build/web > "$RUNNER_TEMP/s96-http.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..40}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          S96_BASE_URL=http://127.0.0.1:4173/ node tests/browser_smoke.mjs
+
+      - name: Publish atomically to gh-pages
+        if: steps.source.outputs.needs_release == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euxo pipefail
+          PAGES_DIR="$RUNNER_TEMP/s96-pages"
+          rm -rf "$PAGES_DIR"
+          git worktree add --detach "$PAGES_DIR" origin/gh-pages
+
+          find "$PAGES_DIR" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$GITHUB_WORKSPACE/source/$PROJECT_REL/build/web/." "$PAGES_DIR/"
+
+          cd "$PAGES_DIR"
+          git config user.name "Saratov 96 Release Bot"
+          git config user.email "saratov96-release@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No page changes."
+            exit 0
+          fi
+
+          git commit -m "Publish Saratov 96 ${SOURCE_SHA:0:12}"
+          git push origin HEAD:gh-pages
+
+      - name: Release summary
+        if: always()
+        run: |
+          echo "Source ref: $SOURCE_REPO@$SOURCE_REF"
+          echo "Source commit: ${{ steps.source.outputs.sha }}"
+          echo "Released: ${{ steps.source.outputs.needs_release }}"
+          echo "Preview: https://sergey-gh64.github.io/saratov96-preview/"

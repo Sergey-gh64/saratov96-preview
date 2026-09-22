@@ -73,7 +73,7 @@ jobs:
 
       - name: Gameplay and synthetic touch smoke tests
         working-directory: ${{ env.PROJECT_DIR }}
-        run: godot --headless --path . --script res://tests/smoke_test.gd
+        run: godot --headless --path . res://tests/smoke_test.tscn
 
       - name: Web export
         working-directory: ${{ env.PROJECT_DIR }}

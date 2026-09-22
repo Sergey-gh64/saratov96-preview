@@ -1,5 +1,5 @@
 name: Runtime diagnostics
-# verify-live: simulate-ios-audio-suspension
+# verify-live: capture-audiocontext-before-godot
 
 on:
   workflow_dispatch:
@@ -48,7 +48,19 @@ jobs:
               await page.setViewport({ width: 430, height: 932, deviceScaleFactor: 1 });
               await page.evaluateOnNewDocument(() => {
                 window.__s96Audio = { resumes: 0, starts: 0, mediaPlays: 0 };
+                window.__s96AudioContexts = [];
                 const AC = window.AudioContext || window.webkitAudioContext;
+                if (AC) {
+                  const WrappedAC = new Proxy(AC, {
+                    construct(target, args) {
+                      const ctx = Reflect.construct(target, args);
+                      window.__s96AudioContexts.push(ctx);
+                      return ctx;
+                    }
+                  });
+                  if (window.AudioContext) window.AudioContext = WrappedAC;
+                  if (window.webkitAudioContext) window.webkitAudioContext = WrappedAC;
+                }
                 if (AC && AC.prototype) {
                   const resume = AC.prototype.resume;
                   if (resume) {
@@ -122,29 +134,31 @@ jobs:
               state.overlayRemoved = overlayRemoved;
 
               if (name === 'level1' && overlayRemoved) {
-                state.godotAudioBefore = await page.evaluate(() => ({
-                  exists: typeof GodotAudio !== 'undefined' && !!GodotAudio.ctx,
-                  state: (typeof GodotAudio !== 'undefined' && GodotAudio.ctx) ? GodotAudio.ctx.state : null,
-                }));
+                state.godotAudioBefore = await page.evaluate(() => {
+                  const ctx = (window.__s96AudioContexts || [])[0] || null;
+                  return { exists: !!ctx, state: ctx?.state || null, count: (window.__s96AudioContexts || []).length };
+                });
 
                 await page.evaluate(async () => {
-                  if (typeof GodotAudio !== 'undefined' && GodotAudio.ctx) {
-                    await GodotAudio.ctx.suspend();
-                  }
-                  const unlock = () => {
-                    try {
-                      if (typeof GodotAudio !== 'undefined' && GodotAudio.ctx && GodotAudio.ctx.state === 'suspended') {
-                        GodotAudio.ctx.resume().catch(() => {});
-                      }
-                    } catch (_) {}
+                  const contexts = window.__s96AudioContexts || [];
+                  if (contexts[0]) await contexts[0].suspend();
+                  window.__s96UnlockCapturedAudio = () => {
+                    for (const ctx of (window.__s96AudioContexts || [])) {
+                      try {
+                        if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
+                          const p = ctx.resume();
+                          if (p && p.catch) p.catch(() => {});
+                        }
+                      } catch (_) {}
+                    }
                   };
-                  document.addEventListener('pointerdown', unlock, {capture:true, passive:true});
-                  document.addEventListener('touchstart', unlock, {capture:true, passive:true});
-                  document.addEventListener('click', unlock, {capture:true, passive:true});
+                  document.addEventListener('pointerdown', window.__s96UnlockCapturedAudio, {capture:true, passive:true});
+                  document.addEventListener('touchstart', window.__s96UnlockCapturedAudio, {capture:true, passive:true});
+                  document.addEventListener('click', window.__s96UnlockCapturedAudio, {capture:true, passive:true});
                 });
 
                 state.godotAudioSuspended = await page.evaluate(() => (
-                  typeof GodotAudio !== 'undefined' && GodotAudio.ctx ? GodotAudio.ctx.state : null
+                  (window.__s96AudioContexts || [])[0]?.state || null
                 ));
 
                 await page.mouse.click(60, 243);
@@ -156,7 +170,8 @@ jobs:
                     starts: audio.starts || 0,
                     mediaPlays: audio.mediaPlays || 0,
                     contextState: audio.lastContext?.state || null,
-                    godotContextState: (typeof GodotAudio !== 'undefined' && GodotAudio.ctx) ? GodotAudio.ctx.state : null,
+                    godotContextState: (window.__s96AudioContexts || [])[0]?.state || null,
+                    capturedContexts: (window.__s96AudioContexts || []).length,
                   };
                 });
               }

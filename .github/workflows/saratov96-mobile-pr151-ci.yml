@@ -1,0 +1,91 @@
+name: Saratov 96 PR151 CI mirror
+
+on:
+  push:
+    branches:
+      - ci/saratov96-mobile-pr151
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_RELEASE: "4.7.2-stable"
+  PROJECT_DIR: "ci/saratov96-mobile"
+
+jobs:
+  validate:
+    name: Godot import + gameplay + Web export
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install runtime libraries
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl unzip \
+            libfontconfig1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libgl1 libasound2t64
+
+      - name: Install Godot 4.7.2
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/godot"
+          curl -LfsS \
+            "https://godot-releases.nbg1.your-objectstorage.com/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" \
+            -o "$RUNNER_TEMP/godot.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          mv "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" "$RUNNER_TEMP/godot/godot"
+          chmod +x "$RUNNER_TEMP/godot/godot"
+          echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/godot/godot" --version
+
+      - name: Install Web templates
+        run: |
+          set -euxo pipefail
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$TEMPLATE_DIR"
+          curl -LfsS \
+            "https://godot-releases.nbg1.your-objectstorage.com/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz" \
+            -o "$RUNNER_TEMP/templates.tpz"
+          rm -rf "$RUNNER_TEMP/templates"
+          mkdir -p "$RUNNER_TEMP/templates"
+          unzip -q "$RUNNER_TEMP/templates.tpz" -d "$RUNNER_TEMP/templates"
+          cp -a "$RUNNER_TEMP/templates/templates/." "$TEMPLATE_DIR/"
+          test -s "$TEMPLATE_DIR/web_nothreads_release.zip"
+
+      - name: Godot parser/import validation
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: godot --headless --path . --editor --quit
+
+      - name: Gameplay and synthetic touch smoke tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: godot --headless --path . --script res://tests/smoke_test.gd
+
+      - name: Web export
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euxo pipefail
+          rm -rf build/web
+          mkdir -p build/web
+          godot --headless --path . --export-release Web build/web/index.html
+          python3 tools/prepare_web_release.py build/web "$GITHUB_SHA" "pr151-ci.${GITHUB_RUN_NUMBER}"
+          test -s build/web/index.html
+          test -s build/web/index.wasm
+          test -s build/web/index.pck
+          test -s build/web/build.json
+          grep -q 'viewport-fit=cover' build/web/index.html
+          grep -q 'name="s96-build"' build/web/index.html
+          test ! -e build/web/sw.js
+          test ! -e build/web/service_worker.js
+
+      - name: Upload Web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: saratov96-pr151-web
+          path: ${{ env.PROJECT_DIR }}/build/web
+          if-no-files-found: error
+          retention-days: 3

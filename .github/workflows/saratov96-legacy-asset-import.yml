@@ -1,0 +1,45 @@
+name: Saratov 96 Legacy Asset Import
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/saratov96-legacy-asset-import.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch legacy source bundle
+        run: |
+          set -euxo pipefail
+          curl -LfsS "https://d2ol7oe51mr4n9.cloudfront.net/user_3II1gkf7C7iXTGeOiry0vpOPn3t/3be3ece2-4d3b-43a6-92fa-8180ce6834cb.zip" -o legacy.zip
+          mkdir -p legacy
+          unzip -q legacy.zip -d legacy
+          find legacy -type f | sort
+      - name: Collect graphics and audio
+        run: |
+          set -euxo pipefail
+          mkdir -p extracted-assets
+          find legacy -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.ogg' \) -print0 |
+            while IFS= read -r -d '' f; do
+              rel="${f#legacy/}"
+              mkdir -p "extracted-assets/$(dirname "$rel")"
+              cp "$f" "extracted-assets/$rel"
+            done
+          find extracted-assets -type f -printf '%p %s bytes\n' | sort
+          test "$(find extracted-assets -type f | wc -l)" -gt 0
+      - name: Upload imported assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: saratov96-legacy-assets
+          path: extracted-assets
+          if-no-files-found: error
+          retention-days: 3

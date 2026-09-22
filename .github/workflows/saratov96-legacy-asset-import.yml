@@ -43,3 +43,21 @@ jobs:
           path: extracted-assets
           if-no-files-found: error
           retention-days: 3
+      - name: Collect source reference
+        run: |
+          set -euxo pipefail
+          mkdir -p extracted-source
+          find legacy -type f \( -iname '*.gd' -o -iname '*.tscn' -o -name 'project.godot' -o -name 'export_presets.cfg' \) -print0 |
+            while IFS= read -r -d '' f; do
+              rel="${f#legacy/}"
+              mkdir -p "extracted-source/$(dirname "$rel")"
+              cp "$f" "extracted-source/$rel"
+            done
+          find extracted-source -type f -printf '%p %s bytes\n' | sort
+      - name: Upload source reference
+        uses: actions/upload-artifact@v4
+        with:
+          name: saratov96-legacy-source-reference
+          path: extracted-source
+          if-no-files-found: error
+          retention-days: 3

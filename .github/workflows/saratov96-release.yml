@@ -42,15 +42,24 @@ jobs:
           grep -q 'browser_smoke.mjs' .github/workflows/saratov96-release.yml
           grep -q 'git push origin HEAD:gh-pages' .github/workflows/saratov96-release.yml
 
-      - name: Check source credential presence
+      - name: Check existing credential aliases
         env:
-          SOURCE_TOKEN: ${{ secrets.S96_SOURCE_READ_TOKEN }}
+          S96_SOURCE_READ_TOKEN: ${{ secrets.S96_SOURCE_READ_TOKEN }}
+          GH_TOKEN_SECRET: ${{ secrets.GH_TOKEN }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          PAT: ${{ secrets.PAT }}
+          GAMEDEV_TOKEN: ${{ secrets.GAMEDEV_TOKEN }}
+          GAMEDEV_GITHUB_TOKEN: ${{ secrets.GAMEDEV_GITHUB_TOKEN }}
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: |
-          if [ -n "$SOURCE_TOKEN" ]; then
-            echo "S96_SOURCE_TOKEN_PRESENT=1"
-          else
-            echo "S96_SOURCE_TOKEN_PRESENT=0"
-          fi
+          for name in S96_SOURCE_READ_TOKEN GH_TOKEN_SECRET GITHUB_PAT PAT GAMEDEV_TOKEN GAMEDEV_GITHUB_TOKEN REPO_TOKEN PERSONAL_ACCESS_TOKEN; do
+            if [ -n "${!name}" ]; then
+              echo "$name=PRESENT"
+            else
+              echo "$name=ABSENT"
+            fi
+          done
 
   release:
     name: Sync source → QA → GitHub Pages

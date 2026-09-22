@@ -1,5 +1,10 @@
 extends "res://scripts/gameplay_controller.gd"
 
+const COURTYARD: Texture2D = preload("res://assets/legacy/courtyard_clean.webp")
+const CHARACTERS: Texture2D = preload("res://assets/legacy/characters.webp")
+const WORLD_REGION := Rect2(188, 390, 753, 1110)
+const WORLD_RECT := Rect2(0, 176, 390, 574)
+
 func _configure_level() -> void:
     level_title = "До ларька с играми"
     level_subtitle = "УРОВЕНЬ 1 · ДВОРЫ"
@@ -8,12 +13,12 @@ func _configure_level() -> void:
     goal_node = 14
 
     nodes = {
-        0: Vector2(195, 704),
-        1: Vector2(145, 655), 2: Vector2(245, 655),
-        3: Vector2(108, 592), 4: Vector2(195, 582), 5: Vector2(282, 592),
-        6: Vector2(88, 514), 7: Vector2(155, 505), 8: Vector2(235, 505), 9: Vector2(305, 514),
-        10: Vector2(124, 426), 11: Vector2(195, 421), 12: Vector2(266, 426),
-        13: Vector2(158, 340), 14: Vector2(232, 332),
+        0: Vector2(198, 704),
+        1: Vector2(145, 655), 2: Vector2(252, 655),
+        3: Vector2(108, 592), 4: Vector2(195, 584), 5: Vector2(292, 592),
+        6: Vector2(92, 520), 7: Vector2(157, 508), 8: Vector2(239, 505), 9: Vector2(312, 516),
+        10: Vector2(120, 446), 11: Vector2(198, 432), 12: Vector2(276, 428),
+        13: Vector2(196, 356), 14: Vector2(304, 300),
     }
     adjacency = {
         0: [1, 2],
@@ -42,41 +47,79 @@ func _configure_level() -> void:
     initial_enemy_phases = [1, 0]
 
 func _draw_world_backdrop() -> void:
-    draw_rect(Rect2(0, 176, VIEW_W, 574), Color("#182126"), true)
+    draw_texture_rect_region(COURTYARD, WORLD_RECT, WORLD_REGION)
 
+    # Dark tactical grade hides the baked screenshot treatment and lets live
+    # path/characters read as game objects rather than another layer of noise.
+    draw_rect(WORLD_RECT, Color(0.01, 0.018, 0.022, 0.16), true)
+
+    # Turn the two legacy soft-mask zones into deliberate deep courtyard
+    # shadows instead of leaving them as bright blurred artifacts.
     draw_colored_polygon(PackedVector2Array([
-        Vector2(0, 228), Vector2(144, 196), Vector2(150, 430), Vector2(0, 470)
-    ]), Color("#4D4A43"))
+        Vector2(0, 176), Vector2(94, 176), Vector2(116, 284),
+        Vector2(70, 345), Vector2(0, 326)
+    ]), Color(0.025, 0.035, 0.038, 0.48))
     draw_colored_polygon(PackedVector2Array([
-        Vector2(390, 210), Vector2(255, 192), Vector2(248, 440), Vector2(390, 474)
-    ]), Color("#454742"))
+        Vector2(126, 236), Vector2(342, 230), Vector2(365, 360),
+        Vector2(306, 430), Vector2(155, 414), Vector2(110, 328)
+    ]), Color(0.025, 0.030, 0.032, 0.36))
 
-    for y in [244.0, 294.0, 344.0]:
-        draw_rect(Rect2(18, y, 36, 22), Color("#202D32"), true)
-        draw_rect(Rect2(78, y - 8, 40, 24), Color("#202D32"), true)
-        draw_rect(Rect2(302, y - 4, 42, 24), Color("#1D2B30"), true)
+    # The kiosk is the objective, keep it visually legible.
+    draw_circle(nodes[goal_node], 28.0, Color(0.96, 0.70, 0.20, 0.07))
+    draw_arc(nodes[goal_node], 21.0, 0.0, TAU, 48, Color(0.94, 0.73, 0.31, 0.55), 1.5, true)
 
-    draw_colored_polygon(PackedVector2Array([
-        Vector2(72, 742), Vector2(132, 388), Vector2(258, 388), Vector2(328, 742)
-    ]), Color("#303537"))
-    draw_line(Vector2(194, 742), Vector2(194, 392), Color("#5A5B54"), 2.0)
+func _draw_routes() -> void:
+    for a_variant in adjacency.keys():
+        var a: int = int(a_variant)
+        for b_variant in adjacency[a]:
+            var b: int = int(b_variant)
+            if a < b:
+                draw_line(nodes[a], nodes[b], Color(0.85, 0.67, 0.30, 0.24), 1.4, true)
 
-    for y in range(430, 710, 64):
-        draw_line(Vector2(102, y), Vector2(288, y - 12), Color(0.45, 0.43, 0.38, 0.18), 2.0)
+    var reachable: Array = adjacency.get(player_node, [])
+    for destination_variant in reachable:
+        var destination: int = int(destination_variant)
+        var p: Vector2 = nodes[destination]
+        var pulse := 13.0 + sin(Time.get_ticks_msec() * 0.004 + float(destination)) * 1.6
+        draw_circle(p, pulse, Color(0.95, 0.71, 0.24, 0.10))
+        draw_circle(p, 6.0, Color(0.95, 0.72, 0.25, 0.92))
+        draw_arc(p, 10.0, 0.0, TAU, 32, Color(0.98, 0.80, 0.45, 0.90), 1.6, true)
 
-    draw_rect(Rect2(192, 278, 122, 76), Color("#2B2118"), true)
-    draw_rect(Rect2(201, 287, 104, 58), Color("#76522D"), true)
-    draw_rect(Rect2(210, 296, 86, 24), Color("#D6B34E"), true)
-    draw_string(ThemeDB.fallback_font, Vector2(217, 314), "ИГРЫ · CD", HORIZONTAL_ALIGNMENT_LEFT, 74, 12, Color("#241A12"))
-    draw_rect(Rect2(230, 320, 38, 25), Color("#131719"), true)
+func _draw_player() -> void:
+    _draw_character_region(nodes[player_node], Rect2(10, 20, 350, 1040), 0.105, true)
 
-    draw_string(ThemeDB.fallback_font, Vector2(18, 500), "ГАРАЖИ", HORIZONTAL_ALIGNMENT_LEFT, 80, 11, Color("#8C989A"))
-    draw_string(ThemeDB.fallback_font, Vector2(284, 548), "ДВОР", HORIZONTAL_ALIGNMENT_LEFT, 74, 11, Color("#8C989A"))
-    draw_string(ThemeDB.fallback_font, Vector2(18, 724), "1996", HORIZONTAL_ALIGNMENT_LEFT, 70, 12, Color("#C9A950"))
+func _draw_enemies() -> void:
+    var regions := [
+        Rect2(370, 20, 320, 1040),
+        Rect2(700, 20, 390, 1020),
+        Rect2(1080, 150, 340, 860),
+    ]
+    for i in range(enemy_specs.size()):
+        var spec: Dictionary = enemy_specs[i]
+        var patrol: Array = spec["patrol"]
+        var phase: int = int(enemy_phases[i]) % patrol.size()
+        var enemy_node: int = int(patrol[phase])
+        _draw_character_region(nodes[enemy_node], regions[mini(i, regions.size() - 1)], 0.108, false)
+
+func _draw_character_region(feet: Vector2, region: Rect2, scale_value: float, hero: bool) -> void:
+    var width: float = region.size.x * scale_value
+    var height: float = region.size.y * scale_value
+    var dest := Rect2(feet.x - width * 0.5, feet.y - height + 20.0, width, height)
+
+    draw_set_transform(feet + Vector2(0, 7), 0.0, Vector2(1.0, 0.36))
+    draw_circle(Vector2.ZERO, 18.0 if hero else 20.0, Color(0, 0, 0, 0.46))
+    draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+    if hero:
+        draw_circle(feet + Vector2(0, 4), 16.0, Color(0.23, 0.55, 0.86, 0.16))
+        draw_arc(feet + Vector2(0, 4), 16.0, 0.0, TAU, 32, Color(0.45, 0.72, 0.96, 0.72), 1.4, true)
+
+    draw_texture_rect_region(CHARACTERS, dest, region)
 
 func _after_safe_move() -> void:
     if player_node in [3, 4, 5] and turn % 2 == 1:
         _say("ГОПНИК", "Эй, пацан. Иди сюда.", 2.0)
+        AudioManager.play_voice("near_" + str((turn % 4) + 1))
     elif player_node in [10, 11, 12]:
         _say("ЛАРЁК", "До витрины уже недалеко.", 1.8)
 
@@ -86,6 +129,7 @@ func _say(speaker: String, text_value: String, seconds: float) -> void:
     dialogue_time = seconds
 
 func _caught_text(who: String) -> String:
+    AudioManager.play_voice("catch_" + str((turn % 3) + 1))
     for spec_variant in enemy_specs:
         var spec: Dictionary = spec_variant
         if String(spec["name"]) == who:

@@ -96,10 +96,28 @@ jobs:
           test ! -e build/web/sw.js
           test ! -e build/web/service_worker.js
 
+      - name: Mobile browser touch QA
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euxo pipefail
+          npm install --no-save --package-lock=false puppeteer-core@24
+          python3 -m http.server 4173 --directory build/web > "$RUNNER_TEMP/s96-http.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..40}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          S96_BASE_URL=http://127.0.0.1:4173/ node tests/browser_smoke.mjs
+
       - name: Upload Web artifact
         uses: actions/upload-artifact@v4
         with:
           name: saratov96-pr151-web
-          path: ${{ env.PROJECT_DIR }}/build/web
+          path: |
+            ${{ env.PROJECT_DIR }}/build/web
+            ${{ env.PROJECT_DIR }}/browser-qa
           if-no-files-found: error
           retention-days: 3

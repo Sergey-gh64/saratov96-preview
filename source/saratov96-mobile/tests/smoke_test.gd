@@ -12,6 +12,17 @@ func _run() -> void:
     _check(audio != null, "AudioManager autoload exists")
     if audio != null:
         _check(bool(audio.get("enabled")) == false, "audio must start OFF")
+        _check(audio.has_method("resources_ready") and bool(audio.resources_ready()), "imported MP3 audio resources load")
+        audio.set_enabled(true)
+        await get_tree().process_frame
+        _check(bool(audio.get("enabled")) == true, "audio toggles ON")
+        _check(audio.music_player != null and audio.music_player.stream is AudioStreamMP3, "music uses imported MP3, not procedural WAV")
+        audio.set_enabled(false)
+        _check(bool(audio.get("enabled")) == false, "audio toggles OFF")
+
+    _check(ResourceLoader.exists("res://assets/legacy/courtyard_clean.webp"), "Level 1 courtyard art exists")
+    _check(ResourceLoader.exists("res://assets/legacy/characters.webp"), "character atlas exists")
+    _check(ResourceLoader.exists("res://assets/audio/music_30s.mp3"), "music file exists")
 
     var select_scene: PackedScene = load("res://scenes/level_select.tscn")
     _check(select_scene != null, "level select scene loads")

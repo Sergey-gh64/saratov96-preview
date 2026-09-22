@@ -43,18 +43,28 @@ jobs:
           echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/godot/godot" --version
 
-      - name: Install Web templates
+      - name: Install Web templates only
         run: |
           set -euxo pipefail
           TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
           mkdir -p "$TEMPLATE_DIR"
-          curl -LfsS \
-            "https://godot-releases.nbg1.your-objectstorage.com/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz" \
-            -o "$RUNNER_TEMP/templates.tpz"
-          rm -rf "$RUNNER_TEMP/templates"
-          mkdir -p "$RUNNER_TEMP/templates"
-          unzip -q "$RUNNER_TEMP/templates.tpz" -d "$RUNNER_TEMP/templates"
-          cp -a "$RUNNER_TEMP/templates/templates/." "$TEMPLATE_DIR/"
+          python3 -m pip install --quiet remotezip
+          TEMPLATE_DIR="$TEMPLATE_DIR" GODOT_RELEASE="$GODOT_RELEASE" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from remotezip import RemoteZip
+
+          release = os.environ["GODOT_RELEASE"]
+          out = Path(os.environ["TEMPLATE_DIR"])
+          url = f"https://godot-releases.nbg1.your-objectstorage.com/{release}/Godot_v{release}_export_templates.tpz"
+          with RemoteZip(url) as archive:
+              for name in (
+                  "templates/web_nothreads_release.zip",
+                  "templates/web_nothreads_debug.zip",
+                  "templates/version.txt",
+              ):
+                  (out / Path(name).name).write_bytes(archive.read(name))
+          PY
           test -s "$TEMPLATE_DIR/web_nothreads_release.zip"
 
       - name: Godot parser/import validation

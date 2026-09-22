@@ -1,4 +1,4 @@
-const CACHE='s96-runtime-v4';
+const CACHE='s96-runtime-v5';
 const CORE=['./','./manifest.webmanifest','./icon-180.png','./icon-512.png'];
 self.addEventListener('install',event=>{
   self.skipWaiting();

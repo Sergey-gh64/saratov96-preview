@@ -140,7 +140,17 @@ body {
   window.__s96UnlockGodotAudio = function(){
     (window.__s96AudioContexts || []).forEach(function(ctx){
       try {
-        if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {
+        if (!ctx || ctx.state === 'closed') return;
+
+        // Safari needs a real WebAudio start inside the user gesture.
+        // resume() alone is not a reliable unlock on iPhone.
+        var buffer = ctx.createBuffer(1, 1, ctx.sampleRate || 44100);
+        var source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+
+        if (ctx.state !== 'running') {
           var p = ctx.resume();
           if (p && p.catch) p.catch(function(){});
         }
@@ -155,7 +165,7 @@ body {
 </script>
 <script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":5568216,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":5568360,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 

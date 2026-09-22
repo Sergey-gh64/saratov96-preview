@@ -95,12 +95,14 @@ try {
   const level1Png = await capture(page, 'level1');
   check(digest(level1Png) !== digest(selectPng), 'touch on Level 1 changes rendered scene');
 
+  const soundBefore = await page.screenshot({ clip: { x: 264, y: 22, width: 112, height: 50 } });
   await page.touchscreen.tap(320, 46);
   await new Promise(resolve => setTimeout(resolve, 500));
-  const level1AudioOn = await capture(page, 'level1-audio-on');
-  check(digest(level1AudioOn) !== digest(level1Png), 'touch on sound button changes audio state UI');
+  const soundAfter = await page.screenshot({ clip: { x: 264, y: 22, width: 112, height: 50 } });
+  await capture(page, 'level1-audio-on');
+  check(digest(soundAfter) !== digest(soundBefore), 'one touch changes sound button from OFF to ON');
 
-  const beforeMove = level1AudioOn;
+  const beforeMove = await capture(page, 'level1-audio-on-state');
   await page.touchscreen.tap(145, 655);
   await new Promise(resolve => setTimeout(resolve, 500));
   const afterMove = await capture(page, 'level1-after-touch-move');

@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/saratov96-release.yml"
 
 permissions:
   contents: write
@@ -20,8 +25,26 @@ env:
   PROJECT_REL: "games/saratov96-mobile"
 
 jobs:
+  validate:
+    name: Validate release workflow contract
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate GitHub-native release contract
+        run: |
+          set -euxo pipefail
+          test -s .github/workflows/saratov96-release.yml
+          grep -q 'S96_SOURCE_READ_TOKEN' .github/workflows/saratov96-release.yml
+          grep -q 'release/saratov96-live' .github/workflows/saratov96-release.yml
+          grep -q 'games/saratov96-mobile' .github/workflows/saratov96-release.yml
+          grep -q 'smoke_test.tscn' .github/workflows/saratov96-release.yml
+          grep -q 'browser_smoke.mjs' .github/workflows/saratov96-release.yml
+          grep -q 'git push origin HEAD:gh-pages' .github/workflows/saratov96-release.yml
+
   release:
     name: Sync source → QA → GitHub Pages
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 

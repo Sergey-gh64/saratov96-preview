@@ -1,5 +1,5 @@
 name: Runtime diagnostics
-# verify-live: capture-audiocontext-before-godot
+# verify-live: 6ef65b4-final-ios-audio-hud
 
 on:
   workflow_dispatch:

@@ -95,7 +95,12 @@ try {
   const level1Png = await capture(page, 'level1');
   check(digest(level1Png) !== digest(selectPng), 'touch on Level 1 changes rendered scene');
 
-  const beforeMove = level1Png;
+  await page.touchscreen.tap(320, 46);
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const level1AudioOn = await capture(page, 'level1-audio-on');
+  check(digest(level1AudioOn) !== digest(level1Png), 'touch on sound button changes audio state UI');
+
+  const beforeMove = level1AudioOn;
   await page.touchscreen.tap(145, 655);
   await new Promise(resolve => setTimeout(resolve, 500));
   const afterMove = await capture(page, 'level1-after-touch-move');

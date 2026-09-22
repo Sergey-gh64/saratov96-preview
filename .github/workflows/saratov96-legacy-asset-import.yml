@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   import:
@@ -36,6 +36,22 @@ jobs:
             done
           find extracted-assets -type f -printf '%p %s bytes\n' | sort
           test "$(find extracted-assets -type f | wc -l)" -gt 0
+      - name: Commit assets into release source snapshot
+        run: |
+          set -euxo pipefail
+          rm -rf source/saratov96-mobile/assets/legacy source/saratov96-mobile/assets/audio
+          mkdir -p source/saratov96-mobile/assets/legacy source/saratov96-mobile/assets/audio
+          cp extracted-assets/s96web/assets/courtyard_clean.webp source/saratov96-mobile/assets/legacy/
+          cp extracted-assets/s96web/assets/characters.webp source/saratov96-mobile/assets/legacy/
+          cp extracted-assets/s96web/assets/hud.webp source/saratov96-mobile/assets/legacy/
+          cp extracted-assets/s96web/assets/audio/*.mp3 source/saratov96-mobile/assets/audio/
+          git config user.name "Saratov 96 Asset Import"
+          git config user.email "saratov96-assets@users.noreply.github.com"
+          git add source/saratov96-mobile/assets
+          if ! git diff --cached --quiet; then
+            git commit -m "Import Saratov 96 visual and audio assets"
+            git push
+          fi
       - name: Upload imported assets
         uses: actions/upload-artifact@v4
         with:
